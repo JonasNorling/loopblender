@@ -84,7 +84,7 @@ static bool allocateBuffer(Context* ctx)
 	return false;
 }
 
-static void fillWithTestData(Context* ctx)
+static void fillWithTestTones(Context* ctx)
 {
 	fprintf(stderr, "Generating test loops... ");
 
@@ -102,6 +102,21 @@ static void fillWithTestData(Context* ctx)
 	}
 
 	fprintf(stderr, "done.\n");
+}
+
+static void fillWithClicks(Context* ctx)
+{
+	for (int loop = 0; loop < ctx->loopcount; loop++) {
+		for (int sample = 0; sample < ctx->looplen; sample++) {
+			Sample value = 0;
+			if ((sample % (ctx->looplen / 8)) >= 0 && (sample % (ctx->looplen / 8)) < 300) {
+				const float hz = 1760;
+				const Sample amplitude = sample < 300 ? 0.6 : 0.25;
+				value = amplitude * sinf(sample * 2*M_PI * hz / ctx->samplerate);
+			}
+			ctx->buffer[sampleOffset(ctx, loop, sample, 0)] = value;
+		}
+	}
 }
 
 static void process(void* _ctx, Sample* outbuffer, Sample* inbuffer, int count)
@@ -161,7 +176,8 @@ static void printHelp()
 	printf("Usage:\n"
 			"  -n, --loops=N       Number of loops [default: 100]\n"
 			"  -l, --length=N      Loop length in samples [default: 48000]\n"
-			"  -t, --testloops     Create test loops\n"
+			"  --testtones         Create test tones in all loops\n"
+			"  --metronomes        Create metronomes in all loops\n"
 			"  -m, --mididev=PORT  Connect MIDI input to this JACK port\n"
 			"  -o, --audioout=PORT Connect audio output to this JACK port\n"
 			"  -i, --audioin=PORT  Connect audio input to this JACK port\n"
@@ -173,7 +189,8 @@ int main(int argc, char* argv[])
 {
 	int length = 48000;
 	int loops = 100;
-	bool testloops = false;
+	bool testtones = false;
+	bool metronomes = false;
 	const char* mididev = 0;
 	const char* audioout = 0;
 	const char* audioin = 0;
@@ -185,11 +202,12 @@ int main(int argc, char* argv[])
 			{ "audioout", required_argument, 0, 'o' },
 			{ "audioin", required_argument, 0, 'i' },
 //			{ "loopdir", required_argument, 0, 'd' },
-			{ "testloops", required_argument, 0, 't' },
+			{ "testtones", no_argument, 0, 1 },
+			{ "metronomes", no_argument, 0, 2 },
 			{ "help", no_argument, 0, 'h'},
 			{ 0, 0, 0, 0}};
 	int opt;
-	while ((opt = getopt_long(argc, argv, "n:l:m:o:i:th", longopts, 0)) != -1) {
+	while ((opt = getopt_long(argc, argv, "n:l:m:o:i:h", longopts, 0)) != -1) {
 		switch (opt) {
 		case 'n':
 			loops = atoi(optarg);
@@ -197,8 +215,11 @@ int main(int argc, char* argv[])
 		case 'l':
 			length = atoi(optarg);
 			break;
-		case 't':
-			testloops = true;
+		case 1:
+			testtones = true;
+			break;
+		case 2:
+			metronomes = true;
 			break;
 		case 'm':
 			mididev = optarg;
@@ -238,8 +259,12 @@ int main(int argc, char* argv[])
 	}
 
 	ctx.samplerate = jackGetSampleRate(jackCtx);
-	if (testloops) {
-		fillWithTestData(&ctx);
+
+	if (testtones) {
+		fillWithTestTones(&ctx);
+	}
+	if (metronomes) {
+		fillWithClicks(&ctx);
 	}
 
 	if (mididev != 0 && mididev[0] != '\0') {
