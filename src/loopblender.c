@@ -23,7 +23,6 @@
  * Types and constants
  * *************************************************************/
 
-typedef int16_t Sample;
 static const Sample MaxSample = INT16_MAX;
 static const Sample MinSample = INT16_MIN;
 
@@ -37,6 +36,10 @@ typedef struct {
 	int channels;   ///< Number of channels (1=mono, 2=stereo)
 	Sample* buffer; ///< Sample buffer where all the loops are kept
 	int buffersize; ///< Buffer size in bytes
+
+	int samplept;   ///< Currently playing sample number
+
+	uint8_t* loopLevels; ///< Current volume for each loop, 0..127
 } Context;
 
 /* *************************************************************
@@ -92,7 +95,7 @@ static void fillWithTestData(Context* ctx)
 		// so there will be clicking. Also, this is silly slow of course.
 
 		const float hz = noteToHz(loop);
-		const Sample amplitude = 0.5 * MaxSample;
+		const Sample amplitude = MaxSample;
 		for (int sample = 0; sample < ctx->looplen; sample++) {
 			Sample value = round(amplitude * sinf(sample * 2*M_PI * hz / ctx->samplerate));
 			ctx->buffer[sampleOffset(ctx, loop, sample, 0)] = value;
@@ -100,6 +103,34 @@ static void fillWithTestData(Context* ctx)
 	}
 
 	fprintf(stderr, "done.\n");
+}
+
+static void createSamples(void* _ctx, Sample* buffer, int count)
+{
+	Context* ctx = (Context*)_ctx;
+
+	int pt = ctx->samplept;
+
+	for (int sample = 0; sample < count; sample++) {
+		pt = (pt + 1) % ctx->looplen;
+
+		// Accumulate samples (16 bit) multiplied by volume level (7 bit)
+		int32_t value = 0;
+		for (int loop = 0; loop < ctx->loopcount; loop++) {
+			value += ctx->loopLevels[loop] * ctx->buffer[sampleOffset(ctx, loop, pt, 0)];
+		}
+		buffer[sample] = value >> 8;
+	}
+
+	ctx->samplept = pt;
+}
+
+static void setLevel(void* _ctx, int loop, float level)
+{
+	Context* ctx = (Context*)_ctx;
+	if (loop < ctx->loopcount) {
+		ctx->loopLevels[loop] = level * 128;
+	}
 }
 
 /* *************************************************************
@@ -130,7 +161,6 @@ int main(int argc, char* argv[])
 			{ "loops", required_argument, 0, 'n' },
 			{ "samplerate", required_argument, 0, 'r' },
 			{ "length", required_argument, 0, 'l' },
-//			{ "audiodev", required_argument, 0, 'a' },
 			{ "mididev", required_argument, 0, 'm' },
 //			{ "loopdir", required_argument, 0, 'd' },
 			{ "testloops", required_argument, 0, 't' },
@@ -170,6 +200,7 @@ int main(int argc, char* argv[])
 	ctx.channels = 1; // Mono
 	ctx.looplen = length;
 	ctx.samplerate = samplerate;
+	ctx.loopLevels = calloc(ctx.loopcount, sizeof(uint8_t));
 
 	if (!allocateBuffer(&ctx)) {
 		fprintf(stderr, "Failed to allocate buffers\n");
@@ -180,7 +211,11 @@ int main(int argc, char* argv[])
 		fillWithTestData(&ctx);
 	}
 
-	AlsaContext* alsaCtx = alsaInit();
+	AlsaContext* alsaCtx = alsaInit(createSamples, setLevel, &ctx);
+	if (alsaCtx == 0) {
+		fprintf(stderr, "ALSA init failed\n");
+		return 1;
+	}
 
 	if (mididev != 0 && mididev[0] != '\0') {
 		if (!alsaConnectMidiInput(alsaCtx, mididev)) {
