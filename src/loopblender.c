@@ -17,6 +17,8 @@
 #include <unistd.h>
 #include <math.h>
 
+#include "alsa.h"
+
 /* *************************************************************
  * Types and constants
  * *************************************************************/
@@ -111,6 +113,7 @@ static void printHelp()
 			"  -r, --samplerate=N Sample rate in Hz [default: 48000]\n"
 			"  -l, --length=N     Loop length in samples [default: samplerate]\n"
 			"  -t, --testloops    Create test loops\n"
+			"  -m, --mididev=PORT Connect MIDI input to this ALSA port (client:port)\n"
 			"  -h, --help         Print help\n"
 			);
 }
@@ -121,19 +124,20 @@ int main(int argc, char* argv[])
 	int length = 1 * samplerate;
 	int loops = 100;
 	bool testloops = false;
+	const char* mididev = 0;
 
 	struct option longopts[] = {
 			{ "loops", required_argument, 0, 'n' },
 			{ "samplerate", required_argument, 0, 'r' },
 			{ "length", required_argument, 0, 'l' },
 //			{ "audiodev", required_argument, 0, 'a' },
-//			{ "mididev", required_argument, 0, 'm' },
+			{ "mididev", required_argument, 0, 'm' },
 //			{ "loopdir", required_argument, 0, 'd' },
 			{ "testloops", required_argument, 0, 't' },
 			{ "help", no_argument, 0, 'h'},
 			{ 0, 0, 0, 0}};
 	int opt;
-	while ((opt = getopt_long(argc, argv, "n:r:l:th", longopts, 0)) != -1) {
+	while ((opt = getopt_long(argc, argv, "n:r:l:m:th", longopts, 0)) != -1) {
 		switch (opt) {
 		case 'n':
 			loops = atoi(optarg);
@@ -146,6 +150,9 @@ int main(int argc, char* argv[])
 			break;
 		case 't':
 			testloops = true;
+			break;
+		case 'm':
+			mididev = optarg;
 			break;
 		case 'h':
 			printHelp();
@@ -171,6 +178,19 @@ int main(int argc, char* argv[])
 
 	if (testloops) {
 		fillWithTestData(&ctx);
+	}
+
+	AlsaContext* alsaCtx = alsaInit();
+
+	if (mididev != 0 && mididev[0] != '\0') {
+		if (!alsaConnectMidiInput(alsaCtx, mididev)) {
+			fprintf(stderr, "Failed to connect MIDI input to %s\n", mididev);
+		}
+	}
+
+	if (!alsaLoop(alsaCtx)) {
+		fprintf(stderr, "ALSA failed\n");
+		return 1;
 	}
 
 	return 0;

@@ -1,2 +1,2 @@
 bin_PROGRAMS = loopblender
-loopblender_SOURCES = loopblender.c
+loopblender_SOURCES = loopblender.c alsa.c

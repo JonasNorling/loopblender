@@ -9,7 +9,8 @@ AM_INIT_AUTOMAKE()
 
 AC_PROG_CC_C99
 
-LIBS="$LIBS -lm"
+LIBS="$LIBS -lm -lasound -pthread"
+CFLAGS="$CFLAGS -Wall -Werror"
 
 AC_CONFIG_FILES(Makefile src/Makefile)
 AC_OUTPUT
