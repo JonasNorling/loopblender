@@ -9,6 +9,8 @@ AM_INIT_AUTOMAKE()
 
 AC_PROG_CC_C99
 
+LIBS="$LIBS -lm"
+
 AC_CONFIG_FILES(Makefile src/Makefile)
 AC_OUTPUT
 

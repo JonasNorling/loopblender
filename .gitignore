@@ -16,3 +16,5 @@ src/Makefile
 src/Makefile.in
 src/loopblender
 src/*.o
+.autotools
+.settings
