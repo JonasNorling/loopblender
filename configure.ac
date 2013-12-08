@@ -9,8 +9,10 @@ AM_INIT_AUTOMAKE()
 
 AC_PROG_CC_C99
 
-LIBS="$LIBS -lm -lasound -pthread"
-CFLAGS="$CFLAGS -Wall -Werror"
+PKG_CHECK_MODULES(JACK, jack)
+
+LIBS="$LIBS -lm $JACK_LIBS"
+CFLAGS="$CFLAGS -Wall -Werror $JACK_CFLAGS"
 
 AC_CONFIG_FILES(Makefile src/Makefile)
 AC_OUTPUT

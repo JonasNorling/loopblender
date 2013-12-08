@@ -17,14 +17,11 @@
 #include <unistd.h>
 #include <math.h>
 
-#include "alsa.h"
+#include "jackdev.h"
 
 /* *************************************************************
  * Types and constants
  * *************************************************************/
-
-static const Sample MaxSample = INT16_MAX;
-static const Sample MinSample = INT16_MIN;
 
 static const int MidiNoteA4 = 69;
 static const int HzA4 = 440;
@@ -39,7 +36,7 @@ typedef struct {
 
 	int samplept;   ///< Currently playing sample number
 
-	uint8_t* loopLevels; ///< Current volume for each loop, 0..127
+	float* loopLevels; ///< Current volume for each loop
 } Context;
 
 /* *************************************************************
@@ -95,9 +92,9 @@ static void fillWithTestData(Context* ctx)
 		// so there will be clicking. Also, this is silly slow of course.
 
 		const float hz = noteToHz(loop);
-		const Sample amplitude = MaxSample;
+		const Sample amplitude = 0.3;
 		for (int sample = 0; sample < ctx->looplen; sample++) {
-			Sample value = round(amplitude * sinf(sample * 2*M_PI * hz / ctx->samplerate));
+			Sample value = amplitude * sinf(sample * 2*M_PI * hz / ctx->samplerate);
 			ctx->buffer[sampleOffset(ctx, loop, sample, 0)] = value;
 		}
 	}
@@ -114,22 +111,30 @@ static void createSamples(void* _ctx, Sample* buffer, int count)
 	for (int sample = 0; sample < count; sample++) {
 		pt = (pt + 1) % ctx->looplen;
 
-		// Accumulate samples (16 bit) multiplied by volume level (7 bit)
-		int32_t value = 0;
+		// Accumulate samples multiplied by volume level
+		Sample value = 0.0f;
 		for (int loop = 0; loop < ctx->loopcount; loop++) {
 			value += ctx->loopLevels[loop] * ctx->buffer[sampleOffset(ctx, loop, pt, 0)];
 		}
-		buffer[sample] = value >> 8;
+		buffer[sample] = value;
 	}
 
 	ctx->samplept = pt;
 }
 
-static void setLevel(void* _ctx, int loop, float level)
+static void event(void* _ctx, const Event* event)
 {
 	Context* ctx = (Context*)_ctx;
-	if (loop < ctx->loopcount) {
-		ctx->loopLevels[loop] = level * 128;
+	switch (event->type) {
+	case EVENT_SET_LEVEL:
+		if (event->level < ctx->loopcount) {
+			ctx->loopLevels[event->loop] = event->level;
+			//fprintf(stderr, "Set level of %d to %.2f\n", event->loop, event->level);
+		}
+		break;
+	case EVENT_START_RECORDING:
+	case EVENT_STOP_RECORDING:
+		break;
 	}
 }
 
@@ -141,8 +146,7 @@ static void printHelp()
 {
 	printf("Usage:\n"
 			"  -n, --loops=N      Number of loops [default: 100]\n"
-			"  -r, --samplerate=N Sample rate in Hz [default: 48000]\n"
-			"  -l, --length=N     Loop length in samples [default: samplerate]\n"
+			"  -l, --length=N     Loop length in samples [default: 48000]\n"
 			"  -t, --testloops    Create test loops\n"
 			"  -m, --mididev=PORT Connect MIDI input to this ALSA port (client:port)\n"
 			"  -h, --help         Print help\n"
@@ -151,15 +155,13 @@ static void printHelp()
 
 int main(int argc, char* argv[])
 {
-	int samplerate = 48000;
-	int length = 1 * samplerate;
+	int length = 48000;
 	int loops = 100;
 	bool testloops = false;
 	const char* mididev = 0;
 
 	struct option longopts[] = {
 			{ "loops", required_argument, 0, 'n' },
-			{ "samplerate", required_argument, 0, 'r' },
 			{ "length", required_argument, 0, 'l' },
 			{ "mididev", required_argument, 0, 'm' },
 //			{ "loopdir", required_argument, 0, 'd' },
@@ -167,13 +169,10 @@ int main(int argc, char* argv[])
 			{ "help", no_argument, 0, 'h'},
 			{ 0, 0, 0, 0}};
 	int opt;
-	while ((opt = getopt_long(argc, argv, "n:r:l:m:th", longopts, 0)) != -1) {
+	while ((opt = getopt_long(argc, argv, "n:l:m:th", longopts, 0)) != -1) {
 		switch (opt) {
 		case 'n':
 			loops = atoi(optarg);
-			break;
-		case 'r':
-			samplerate = atoi(optarg);
 			break;
 		case 'l':
 			length = atoi(optarg);
@@ -199,32 +198,32 @@ int main(int argc, char* argv[])
 	ctx.loopcount = loops;
 	ctx.channels = 1; // Mono
 	ctx.looplen = length;
-	ctx.samplerate = samplerate;
-	ctx.loopLevels = calloc(ctx.loopcount, sizeof(uint8_t));
+	ctx.loopLevels = calloc(ctx.loopcount, sizeof(float));
 
 	if (!allocateBuffer(&ctx)) {
 		fprintf(stderr, "Failed to allocate buffers\n");
 		return 1;
 	}
 
+	JackContext* jackCtx = jackInit(createSamples, event, &ctx);
+	if (jackCtx == 0) {
+		fprintf(stderr, "JACK init failed\n");
+		return 1;
+	}
+
+	ctx.samplerate = 48000; // FIXME: Get from JACK
 	if (testloops) {
 		fillWithTestData(&ctx);
 	}
 
-	AlsaContext* alsaCtx = alsaInit(createSamples, setLevel, &ctx);
-	if (alsaCtx == 0) {
-		fprintf(stderr, "ALSA init failed\n");
-		return 1;
-	}
-
 	if (mididev != 0 && mididev[0] != '\0') {
-		if (!alsaConnectMidiInput(alsaCtx, mididev)) {
+		if (!jackConnectMidiInput(jackCtx, mididev)) {
 			fprintf(stderr, "Failed to connect MIDI input to %s\n", mididev);
 		}
 	}
 
-	if (!alsaLoop(alsaCtx)) {
-		fprintf(stderr, "ALSA failed\n");
+	if (!jackLoop(jackCtx)) {
+		fprintf(stderr, "JACK failed\n");
 		return 1;
 	}
 
