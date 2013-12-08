@@ -27,6 +27,9 @@ typedef struct JackContextStruct JackContext;
 
 bool jackLoop(JackContext* ctx);
 JackContext* jackInit(CreateSamplesFn createSamplesFn, EventFn eventFn, void* cbCtx);
+
 bool jackConnectMidiInput(JackContext* ctx, const char* port);
+bool jackConnectAudioOutput(JackContext* ctx, const char* port);
+int jackGetSampleRate(JackContext* ctx);
 
 #endif /* JACKDEV_H_ */

@@ -18,6 +18,8 @@ struct JackContextStruct {
 	jack_port_t* audioout;
 	jack_port_t* midiin;
 
+	int samplerate;
+
 	CreateSamplesFn createSamplesFn;
 	EventFn eventFn;
 	void* cbCtx;
@@ -28,23 +30,41 @@ static void handleMidi(JackContext* ctx, const jack_midi_event_t* event)
 	const jack_midi_data_t* data = event->buffer;
 	if (event->size == 0) {
 		return;
-	} else if ((data[0] & 0xf0) == 0x90) {
-        if (data[2] > 0) {
+	}
+	else if ((data[0] & 0xf0) == 0x90) {
+		// NOTE ON event
+		if (data[2] > 0) {
 			Event e = { .type = EVENT_SET_LEVEL,
 					.loop = data[1],
 					.level = data[2] / 128.0f };
 			ctx->eventFn(ctx->cbCtx, &e);
-        } else {
+		} else {
 			Event e = { .type = EVENT_SET_LEVEL,
 					.loop = data[1],
 					.level = 0 };
 			ctx->eventFn(ctx->cbCtx, &e);
-        }
-	} else if ((data[0] & 0xf0) == 0x80) {
+		}
+	}
+	else if ((data[0] & 0xf0) == 0x80) {
+		// NOTE OFF event
 		Event e = { .type = EVENT_SET_LEVEL,
 				.loop = data[1],
 				.level = 0 };
 		ctx->eventFn(ctx->cbCtx, &e);
+	}
+	else if ((data[0] & 0xf0) == 0xb0) {
+		// CONTROLLER event
+		if (data[1] == 64) {
+			// Sustain switch
+			if (data[2] > 0) {
+				Event e = { .type = EVENT_START_RECORDING };
+				ctx->eventFn(ctx->cbCtx, &e);
+			}
+			else {
+				Event e = { .type = EVENT_STOP_RECORDING };
+				ctx->eventFn(ctx->cbCtx, &e);
+			}
+		}
 	}
 
 	//printf("MIDI: %02x %02x %02x %02x\n", data[0], data[1], data[2], data[3]);
@@ -86,9 +106,10 @@ JackContext* jackInit(CreateSamplesFn createSamplesFn, EventFn eventFn, void* cb
 		return 0;
 	}
 
-	int rate = jack_get_sample_rate(ctx->client);
+	ctx->samplerate = jack_get_sample_rate(ctx->client);
+
 	fprintf(stderr, "Connected to JACK: rate %d Hz, buffer size %d frames, sample size %d bytes\n",
-			rate,
+			ctx->samplerate,
 			jack_get_buffer_size(ctx->client),
 			(int)sizeof(Sample));
 
@@ -99,21 +120,39 @@ JackContext* jackInit(CreateSamplesFn createSamplesFn, EventFn eventFn, void* cb
 
 	jack_set_process_callback(ctx->client, process, ctx);
 
-	return ctx;
-}
-
-bool jackConnectMidiInput(JackContext* ctx, const char* port)
-{
-	return true;
-}
-
-bool jackLoop(JackContext* ctx)
-{
 	if (jack_activate(ctx->client)) {
 		fprintf(stderr, "Cannot start jackiness\n");
 		return false;
 	}
 
+	return ctx;
+}
+
+int jackGetSampleRate(JackContext* ctx)
+{
+	return ctx->samplerate;
+}
+
+bool jackConnectMidiInput(JackContext* ctx, const char* port)
+{
+	int res = jack_connect(ctx->client, port, jack_port_name(ctx->midiin));
+	if (res != 0) {
+		fprintf(stderr, "JACK: Failed to connect MIDI input to %s\n", port);
+	}
+	return res == 0;
+}
+
+bool jackConnectAudioOutput(JackContext* ctx, const char* port)
+{
+	int res = jack_connect(ctx->client, jack_port_name(ctx->audioout), port);
+	if (res != 0) {
+		fprintf(stderr, "JACK: Failed to connect audio output to %s\n", port);
+	}
+	return res == 0;
+}
+
+bool jackLoop(JackContext* ctx)
+{
 	while (true) sleep(1);
 	jack_client_close(ctx->client);
 

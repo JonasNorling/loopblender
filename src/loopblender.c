@@ -133,7 +133,10 @@ static void event(void* _ctx, const Event* event)
 		}
 		break;
 	case EVENT_START_RECORDING:
+		fprintf(stderr, "Recording...\n");
+		break;
 	case EVENT_STOP_RECORDING:
+		fprintf(stderr, "...stopped.\n");
 		break;
 	}
 }
@@ -145,11 +148,12 @@ static void event(void* _ctx, const Event* event)
 static void printHelp()
 {
 	printf("Usage:\n"
-			"  -n, --loops=N      Number of loops [default: 100]\n"
-			"  -l, --length=N     Loop length in samples [default: 48000]\n"
-			"  -t, --testloops    Create test loops\n"
-			"  -m, --mididev=PORT Connect MIDI input to this ALSA port (client:port)\n"
-			"  -h, --help         Print help\n"
+			"  -n, --loops=N       Number of loops [default: 100]\n"
+			"  -l, --length=N      Loop length in samples [default: 48000]\n"
+			"  -t, --testloops     Create test loops\n"
+			"  -m, --mididev=PORT  Connect MIDI input to this JACK port\n"
+			"  -a, --audiodev=PORT Connect audio output to this JACK port\n"
+			"  -h, --help          Print help\n"
 			);
 }
 
@@ -159,17 +163,19 @@ int main(int argc, char* argv[])
 	int loops = 100;
 	bool testloops = false;
 	const char* mididev = 0;
+	const char* audiodev = 0;
 
 	struct option longopts[] = {
 			{ "loops", required_argument, 0, 'n' },
 			{ "length", required_argument, 0, 'l' },
 			{ "mididev", required_argument, 0, 'm' },
+			{ "audiodev", required_argument, 0, 'm' },
 //			{ "loopdir", required_argument, 0, 'd' },
 			{ "testloops", required_argument, 0, 't' },
 			{ "help", no_argument, 0, 'h'},
 			{ 0, 0, 0, 0}};
 	int opt;
-	while ((opt = getopt_long(argc, argv, "n:l:m:th", longopts, 0)) != -1) {
+	while ((opt = getopt_long(argc, argv, "n:l:m:a:th", longopts, 0)) != -1) {
 		switch (opt) {
 		case 'n':
 			loops = atoi(optarg);
@@ -182,6 +188,9 @@ int main(int argc, char* argv[])
 			break;
 		case 'm':
 			mididev = optarg;
+			break;
+		case 'a':
+			audiodev = optarg;
 			break;
 		case 'h':
 			printHelp();
@@ -211,7 +220,7 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 
-	ctx.samplerate = 48000; // FIXME: Get from JACK
+	ctx.samplerate = jackGetSampleRate(jackCtx);
 	if (testloops) {
 		fillWithTestData(&ctx);
 	}
@@ -219,6 +228,12 @@ int main(int argc, char* argv[])
 	if (mididev != 0 && mididev[0] != '\0') {
 		if (!jackConnectMidiInput(jackCtx, mididev)) {
 			fprintf(stderr, "Failed to connect MIDI input to %s\n", mididev);
+		}
+	}
+
+	if (audiodev != 0 && audiodev[0] != '\0') {
+		if (!jackConnectAudioOutput(jackCtx, audiodev)) {
+			fprintf(stderr, "Failed to connect audio output to %s\n", audiodev);
 		}
 	}
 
