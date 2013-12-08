@@ -20,7 +20,7 @@ struct JackContextStruct {
 
 	int samplerate;
 
-	CreateSamplesFn createSamplesFn;
+	ProcessFn processFn;
 	EventFn eventFn;
 	void* cbCtx;
 };
@@ -83,20 +83,20 @@ static int process(jack_nframes_t nframes, void* arg)
 		handleMidi(ctx, &event);
 	}
 
-	//Sample* inbuf = jack_port_get_buffer(ctx->audioin, nframes);
+	Sample* inbuf = jack_port_get_buffer(ctx->audioin, nframes);
 	Sample* outbuf = jack_port_get_buffer(ctx->audioout, nframes);
 
-	ctx->createSamplesFn(ctx->cbCtx, outbuf, nframes);
+	ctx->processFn(ctx->cbCtx, outbuf, inbuf, nframes);
 
 	return 0;
 }
 
-JackContext* jackInit(CreateSamplesFn createSamplesFn, EventFn eventFn, void* cbCtx)
+JackContext* jackInit(ProcessFn createSamplesFn, EventFn eventFn, void* cbCtx)
 {
 	JackContext* ctx = malloc(sizeof(JackContext));
 	memset(ctx, 0, sizeof(JackContext));
 
-	ctx->createSamplesFn = createSamplesFn;
+	ctx->processFn = createSamplesFn;
 	ctx->eventFn = eventFn;
 	ctx->cbCtx = cbCtx;
 
@@ -136,18 +136,18 @@ int jackGetSampleRate(JackContext* ctx)
 bool jackConnectMidiInput(JackContext* ctx, const char* port)
 {
 	int res = jack_connect(ctx->client, port, jack_port_name(ctx->midiin));
-	if (res != 0) {
-		fprintf(stderr, "JACK: Failed to connect MIDI input to %s\n", port);
-	}
 	return res == 0;
 }
 
 bool jackConnectAudioOutput(JackContext* ctx, const char* port)
 {
 	int res = jack_connect(ctx->client, jack_port_name(ctx->audioout), port);
-	if (res != 0) {
-		fprintf(stderr, "JACK: Failed to connect audio output to %s\n", port);
-	}
+	return res == 0;
+}
+
+bool jackConnectAudioInput(JackContext* ctx, const char* port)
+{
+	int res = jack_connect(ctx->client, port, jack_port_name(ctx->audioin));
 	return res == 0;
 }
 

@@ -36,7 +36,9 @@ typedef struct {
 
 	int samplept;   ///< Currently playing sample number
 
-	float* loopLevels; ///< Current volume for each loop
+	float* loopLevels;     ///< Current volume for each loop
+	int lastTriggeredLoop; ///< The loop that was last triggered, to which recording should be done
+	int recordingToLoop;   ///< Loop number that is currently being recorded, or -1
 } Context;
 
 /* *************************************************************
@@ -102,7 +104,7 @@ static void fillWithTestData(Context* ctx)
 	fprintf(stderr, "done.\n");
 }
 
-static void createSamples(void* _ctx, Sample* buffer, int count)
+static void process(void* _ctx, Sample* outbuffer, Sample* inbuffer, int count)
 {
 	Context* ctx = (Context*)_ctx;
 
@@ -116,7 +118,11 @@ static void createSamples(void* _ctx, Sample* buffer, int count)
 		for (int loop = 0; loop < ctx->loopcount; loop++) {
 			value += ctx->loopLevels[loop] * ctx->buffer[sampleOffset(ctx, loop, pt, 0)];
 		}
-		buffer[sample] = value;
+		outbuffer[sample] = value;
+
+		if (ctx->recordingToLoop != -1) {
+			ctx->buffer[sampleOffset(ctx, ctx->recordingToLoop, pt, 0)] = inbuffer[sample];
+		}
 	}
 
 	ctx->samplept = pt;
@@ -127,16 +133,21 @@ static void event(void* _ctx, const Event* event)
 	Context* ctx = (Context*)_ctx;
 	switch (event->type) {
 	case EVENT_SET_LEVEL:
-		if (event->level < ctx->loopcount) {
+		if (event->loop < ctx->loopcount) {
 			ctx->loopLevels[event->loop] = event->level;
 			//fprintf(stderr, "Set level of %d to %.2f\n", event->loop, event->level);
+			if (event->level != 0) {
+				ctx->lastTriggeredLoop = event->loop;
+			}
 		}
 		break;
 	case EVENT_START_RECORDING:
-		fprintf(stderr, "Recording...\n");
+		ctx->recordingToLoop = ctx->lastTriggeredLoop;
+		fprintf(stderr, "Recording to %d...\n", ctx->recordingToLoop);
 		break;
 	case EVENT_STOP_RECORDING:
 		fprintf(stderr, "...stopped.\n");
+		ctx->recordingToLoop = -1;
 		break;
 	}
 }
@@ -152,7 +163,8 @@ static void printHelp()
 			"  -l, --length=N      Loop length in samples [default: 48000]\n"
 			"  -t, --testloops     Create test loops\n"
 			"  -m, --mididev=PORT  Connect MIDI input to this JACK port\n"
-			"  -a, --audiodev=PORT Connect audio output to this JACK port\n"
+			"  -o, --audioout=PORT Connect audio output to this JACK port\n"
+			"  -i, --audioin=PORT  Connect audio input to this JACK port\n"
 			"  -h, --help          Print help\n"
 			);
 }
@@ -163,19 +175,21 @@ int main(int argc, char* argv[])
 	int loops = 100;
 	bool testloops = false;
 	const char* mididev = 0;
-	const char* audiodev = 0;
+	const char* audioout = 0;
+	const char* audioin = 0;
 
 	struct option longopts[] = {
 			{ "loops", required_argument, 0, 'n' },
 			{ "length", required_argument, 0, 'l' },
 			{ "mididev", required_argument, 0, 'm' },
-			{ "audiodev", required_argument, 0, 'm' },
+			{ "audioout", required_argument, 0, 'o' },
+			{ "audioin", required_argument, 0, 'i' },
 //			{ "loopdir", required_argument, 0, 'd' },
 			{ "testloops", required_argument, 0, 't' },
 			{ "help", no_argument, 0, 'h'},
 			{ 0, 0, 0, 0}};
 	int opt;
-	while ((opt = getopt_long(argc, argv, "n:l:m:a:th", longopts, 0)) != -1) {
+	while ((opt = getopt_long(argc, argv, "n:l:m:o:i:th", longopts, 0)) != -1) {
 		switch (opt) {
 		case 'n':
 			loops = atoi(optarg);
@@ -189,8 +203,11 @@ int main(int argc, char* argv[])
 		case 'm':
 			mididev = optarg;
 			break;
-		case 'a':
-			audiodev = optarg;
+		case 'o':
+			audioout = optarg;
+			break;
+		case 'i':
+			audioin = optarg;
 			break;
 		case 'h':
 			printHelp();
@@ -214,7 +231,7 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 
-	JackContext* jackCtx = jackInit(createSamples, event, &ctx);
+	JackContext* jackCtx = jackInit(process, event, &ctx);
 	if (jackCtx == 0) {
 		fprintf(stderr, "JACK init failed\n");
 		return 1;
@@ -231,9 +248,15 @@ int main(int argc, char* argv[])
 		}
 	}
 
-	if (audiodev != 0 && audiodev[0] != '\0') {
-		if (!jackConnectAudioOutput(jackCtx, audiodev)) {
-			fprintf(stderr, "Failed to connect audio output to %s\n", audiodev);
+	if (audioout != 0 && audioout[0] != '\0') {
+		if (!jackConnectAudioOutput(jackCtx, audioout)) {
+			fprintf(stderr, "Failed to connect audio output to %s\n", audioout);
+		}
+	}
+
+	if (audioin != 0 && audioin[0] != '\0') {
+		if (!jackConnectAudioInput(jackCtx, audioin)) {
+			fprintf(stderr, "Failed to connect audio input to %s\n", audioin);
 		}
 	}
 

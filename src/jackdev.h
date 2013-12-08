@@ -19,17 +19,18 @@ typedef struct {
 } Event;
 
 typedef jack_default_audio_sample_t Sample;
-typedef void (*CreateSamplesFn)(void* ctx, Sample* buffer, int count);
+typedef void (*ProcessFn)(void* ctx, Sample* outbuffer, Sample* inbuffer, int count);
 typedef void (*EventFn)(void* ctx, const Event* event);
 
 struct JackContextStruct;
 typedef struct JackContextStruct JackContext;
 
 bool jackLoop(JackContext* ctx);
-JackContext* jackInit(CreateSamplesFn createSamplesFn, EventFn eventFn, void* cbCtx);
+JackContext* jackInit(ProcessFn processFn, EventFn eventFn, void* cbCtx);
 
 bool jackConnectMidiInput(JackContext* ctx, const char* port);
 bool jackConnectAudioOutput(JackContext* ctx, const char* port);
+bool jackConnectAudioInput(JackContext* ctx, const char* port);
 int jackGetSampleRate(JackContext* ctx);
 
 #endif /* JACKDEV_H_ */
